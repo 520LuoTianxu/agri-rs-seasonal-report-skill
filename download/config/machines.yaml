@@ -1,0 +1,29 @@
+# Three machines ↔ three geojson shards (no overlap).
+# Assign one shard_id per machine. Do not run until you are ready.
+
+machines:
+  - id: machine-1
+    shard_id: "01"
+    tiles: data/shards/shard_01.geojson
+    outdir: output/machine-1
+  - id: machine-2
+    shard_id: "02"
+    tiles: data/shards/shard_02.geojson
+    outdir: output/machine-2
+  - id: machine-3
+    shard_id: "03"
+    tiles: data/shards/shard_03.geojson
+    outdir: output/machine-3
+
+defaults:
+  start: "2021-01-01"
+  end: "today"
+  workers: 20
+  max_cloud: 80
+  s2_rgb: false
+  source: microsoft-planetary-computer
+  s2_collection: sentinel-2-l2a
+  s1_collection: sentinel-1-rtc
+  # Parcel pixel metrics NEED parcel polygons (not in parcels_all.jsonl attributes).
+  parcels_attributes: data/full/parcels_all.jsonl
+  parcels_geoms: data/full/parcels_geoms.geojson   # PLACEHOLDER — provide this

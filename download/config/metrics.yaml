@@ -1,0 +1,26 @@
+sentinel2:
+  bands: [B02, B03, B04, B05, B08, B11, SCL]
+  indices:
+    NDVI: "(B08-B04)/(B08+B04)"
+    NDMI: "(B08-B11)/(B08+B11)"
+    NDRE: "(B08-B05)/(B08+B05)"
+    EVI: "2.5*(B08-B04)/(B08+6*B04-7.5*B02+1)"
+    CIre: "(B08/B05)-1"
+    MNDWI: "(B03-B11)/(B03+B11)"
+  scl_clear: [4, 5, 6, 7]
+  optional_rgb: true
+
+sentinel1:
+  collection: sentinel-1-rtc
+  polarizations: [vv, vh]
+  stats: [linear, db]
+  derived: [VV_VH_ratio_db]
+
+parcel_output_fields:
+  - tile_id
+  - parcel_id
+  - date
+  - sensor
+  - clear_fraction   # S2 only
+  - orbit_state      # S1 only
+  - for each index/pol: mean, median, p10, p25, p75, p90, min, max, count

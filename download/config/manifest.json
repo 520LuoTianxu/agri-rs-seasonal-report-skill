@@ -1,0 +1,107 @@
+{
+  "name": "agri_s1s2_parcel_bundle",
+  "purpose": "Tile-level S1/S2 pull then parcel-boundary zonal / pixel metrics; 3-machine shard ready",
+  "do_not_run_yet": true,
+  "n_tiles_full": 6158,
+  "n_parcel_rows": 14050,
+  "tile_size_m_default": 5000,
+  "shards": [
+    {
+      "shard_id": "01",
+      "file": "data/shards/shard_01.geojson",
+      "n_tiles": 2053,
+      "n_unique_tile_id": 2053,
+      "provinces_top": [
+        [
+          "河北省",
+          1120
+        ],
+        [
+          "河南省",
+          566
+        ],
+        [
+          "辽宁省",
+          88
+        ],
+        [
+          "山东省",
+          73
+        ],
+        [
+          "江苏省",
+          70
+        ]
+      ],
+      "machine_hint": "machine-1"
+    },
+    {
+      "shard_id": "02",
+      "file": "data/shards/shard_02.geojson",
+      "n_tiles": 2052,
+      "n_unique_tile_id": 2052,
+      "provinces_top": [
+        [
+          "辽宁省",
+          526
+        ],
+        [
+          "河北省",
+          463
+        ],
+        [
+          "内蒙古自治区",
+          274
+        ],
+        [
+          "河南省",
+          214
+        ],
+        [
+          "江苏省",
+          159
+        ]
+      ],
+      "machine_hint": "machine-2"
+    },
+    {
+      "shard_id": "03",
+      "file": "data/shards/shard_03.geojson",
+      "n_tiles": 2053,
+      "n_unique_tile_id": 2053,
+      "provinces_top": [
+        [
+          "河南省",
+          1011
+        ],
+        [
+          "山东省",
+          361
+        ],
+        [
+          "辽宁省",
+          230
+        ],
+        [
+          "内蒙古自治区",
+          105
+        ],
+        [
+          "河北省",
+          96
+        ]
+      ],
+      "machine_hint": "machine-3"
+    }
+  ],
+  "outputs_schema": {
+    "per_tile": [
+      "s2_indices.json",
+      "s1_indices.json",
+      "optional rgb"
+    ],
+    "per_parcel": [
+      "parcel_metrics.jsonl with S2 indices + S1 VV/VH stats masked to parcel polygon"
+    ]
+  }
+}
