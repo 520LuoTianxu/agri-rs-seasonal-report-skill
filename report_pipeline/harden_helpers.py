@@ -172,6 +172,26 @@ def classic_judge(pct, b, g, r):
     return r('略弱于周边')
 
 
+def pct_verdict(pct):
+    """Good/bad tag for plain ranking language."""
+    if pct >= 80:
+        return '偏好'
+    if pct >= 60:
+        return '略好'
+    if pct >= 40:
+        return '差不多'
+    if pct >= 25:
+        return '偏低'
+    return '偏弱'
+
+
+def pct_plain(pct, b, g, r):
+    """超过周边约 X% 的地块（好/差），替代「第 X 百分位」。"""
+    v = pct_verdict(pct)
+    colored = g(v) if v in ('偏好', '略好') else (b(v) if v == '差不多' else r(v))
+    return f"超过周边约 {b(pct)}% 的同季耕地（{colored}）"
+
+
 def suggest_text(sug_names, issues, uav_txt, P2, TT):
     """Non-template suggestion based on farm/UAV evidence."""
     topics = {i['topic'] for i in issues}

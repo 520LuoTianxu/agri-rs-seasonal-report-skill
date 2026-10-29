@@ -10,11 +10,12 @@ from common import b, g, r
 from catalog import DATA, by_key
 from analyze import load_cube
 from harden_helpers import (
-    farm_issues, wx_anomalies, has_confirmed_disaster, relative_phrase,
+    farm_issues, wx_anomalies, has_confirmed_disaster, relative_phrase, pct_plain, pct_verdict,
     classic_judge, suggest_text, farm_core_bits, mech_paragraphs, uav_clues,
     last_stage_date,
 )
 from agent_load import load_agent, render_agent
+from cover import make_cover_html, COVER_CSS, province_of
 
 def f2(v):
     return '—' if v is None or (isinstance(v, float) and not np.isfinite(v)) else f'{v:.2f}'
@@ -54,7 +55,7 @@ class D(common.Doc):
         N = int(re.search(r'Pages:\s+(\d+)', info).group(1))
         txt = lambda k: subprocess.run(['pdftotext', '-f', str(k), '-l', str(k), '-layout', s.out, '-'],
                                        capture_output=True, text=True).stdout
-        pg = {}; cur = 2
+        pg = {}; cur = 3  # page1=乡合封面, page2=目录
         for a, ti in s.secs:
             for k in range(cur, N + 1):
                 if re.search(rf'^\s*{re.escape(a)}\s+{re.escape(ti[:5])}', txt(k), re.M):
@@ -71,7 +72,14 @@ class D(common.Doc):
 
 def build_one(P):
     K = P['key']; NAME = P['name']
-    PL = json.load(open(P['parcels'])); MU = f"{sum(p['mu'] for p in PL):.2f}"; NP = len(PL)
+    # Prefer deduped parcel list when analyze wrote one (catalog keeps original path).
+    _pp = P['parcels']
+    _dedup = _pp.replace('_parcels.json', '_parcels_dedup.json')
+    if P.get('dedup') and os.path.exists(_dedup):
+        PL = json.load(open(_dedup))
+    else:
+        PL = json.load(open(_pp))
+    MU = f"{sum(p['mu'] for p in PL):.2f}"; NP = len(PL)
     OUT = P['out_pdf']; BD = os.path.dirname(OUT) + '/build/'; os.makedirs(BD, exist_ok=True)
     FG = f"{P['fig_dir']}/{P['fig_prefix']}"
     R = json.load(open(P['rs'])); G = json.load(open(P['gdd']))[P['gdd_key']]; o = R['2026']
@@ -155,7 +163,7 @@ def build_one(P):
         S += (f"<p><b>长势结论：</b>2026 年{SEA_SHORT}长势{judge(pct)}。"
               f"玉米拔节以后叶片封垄，NDVI（绿度）拉不开差距，所以拔节后的长势用 NDRE（叶片营养指数）判断。"
               f"全项目拔节后峰值 NDRE {LN(b(peak_txt),'pmap')}；"
-              f"按峰值 NDVI 与周边 1–2 公里同季耕地比，约在第 {b(pct)} 百分位 {EV('ring')}。")
+              f"按峰值 NDVI 与周边 1–2 公里同季耕地比，{pct_plain(pct, b, g, r)} {EV('ring')}。")
         if hard_abs:
             top_abs = []
             for p2, x, gn in top_persist[:3]:
@@ -198,9 +206,9 @@ def build_one(P):
         S += ('<div class="sum"><b>小结：</b>本项目春播、夏播地块混种，两组分开比较。'
               f"持续弱长势春播组 {b(f1(gs.get('spring',{}).get('P2',0)))} 亩、"
               f"夏播组 {b(f1(gs.get('summer',{}).get('P2',0)))} 亩。"
-              f"与周边同季耕地比，峰值约在第 {b(pct)} 百分位，{judge(pct)}。</div>")
+              f"与周边同季耕地比，峰值{pct_plain(pct, b, g, r)}。</div>")
     else:
-        S += f"<div class=\"sum\"><b>小结：</b>峰值约在周边第 {b(pct)} 百分位，{judge(pct)}；拔节后用 NDRE 看长势。</div>"
+        S += f"<div class=\"sum\"><b>小结：</b>峰值{pct_plain(pct, b, g, r)}；拔节后用 NDRE 看长势。</div>"
 
     S += H2('2.1', '生育期卫星影像')
     S += d.FIGP(FG + 'stages.png', '各生育期 Sentinel-2 真彩色影像（10 米原始像素，经纬度坐标，黄线为项目地块边界）', 100)
@@ -220,9 +228,11 @@ def build_one(P):
     yrows = []
     for y in ('2024', '2025', '2026'):
         if y in R:
-            yrows.append([b(y), b(f3(R[y].get('proj_peak'))), b(round(R[y].get('rank_pct') or 0)),
+            yp = round(R[y].get('rank_pct') or 0)
+            yrows.append([b(y), b(f3(R[y].get('proj_peak'))),
+                          f"约 {b(yp)}%（{pct_verdict(yp)}）",
                           b(f3(R[y].get('ring_peak_pctl', {}).get('50')))])
-    S += TBL(['年份', '峰值 NDVI', '在周边耕地中的百分位', '周边耕地峰值中位数'], yrows, cls='t small',
+    S += TBL(['年份', '峰值 NDVI', '超过周边约多少（评价）', '周边耕地峰值中位数'], yrows, cls='t small',
              cap='三年峰值长势（NDVI；拔节后长势详见第四章 NDRE）'); KEY('h3y')
 
     S += H2('2.3', '与周边对比')
@@ -230,8 +240,8 @@ def build_one(P):
                     ('map.png', '周边对照田位置（黄线＝项目地块）')]:
         if os.path.exists(FG + fn):
             S += d.FIGP(FG + fn, cap, 100 if 'ring' in fn else 48)
-    S += (f"<p>按峰值 NDVI，本项目约在周边第 {b(pct)} 百分位"
-          f"（周边中位 {b(f3(ring50))}）。拔节后峰值 NDRE 为 {b(f3(ndre_peak))}。</p>"); KEY('ring')
+    S += (f"<p>按峰值 NDVI，本项目{pct_plain(pct, b, g, r)}"
+          f"，周边中位 {b(f3(ring50))}。拔节后峰值 NDRE 为 {b(f3(ndre_peak))}。</p>"); KEY('ring')
 
     if NP > 1:
         S += H2('2.4', '各地块峰值长势（逐像素）')
@@ -295,10 +305,17 @@ def build_one(P):
     S += H1('四', '各地块分期弱长势与受损情况')
     bits = []
     for gname, M in W['groups'].items():
-        lab = '春播组' if gname == 'spring' else ('夏播组' if gname == 'summer' else '本组')
+        if mixed:
+            lab = '春播组' if gname == 'spring' else ('夏播组' if gname == 'summer' else '本组')
+        else:
+            lab = '全项目'
         bits.append(f"{lab} {b(f1(M['P2']))} 亩（占本组 {b(f1(M['P2']/M['T']*100 if M['T'] else 0))}%）")
-    S += ('<div class="sum"><b>小结：</b>按关键生育期逐像素检查，至少 2 期都偏弱的持续弱长势：'
-          + '，'.join(bits) + f"，全项目合计 {b(f1(P2))} 亩（{b(f1(P2/TT*100 if TT else 0))}%）。</div>")
+    if mixed:
+        S += ('<div class="sum"><b>小结：</b>按关键生育期逐像素检查，至少 2 期都偏弱的持续弱长势：'
+              + '，'.join(bits) + f"，全项目合计 {b(f1(P2))} 亩（{b(f1(P2/TT*100 if TT else 0))}%）。</div>")
+    else:
+        S += ('<div class="sum"><b>小结：</b>按关键生育期逐像素检查，至少 2 期都偏弱的持续弱长势共 '
+              + f"{b(f1(P2))} 亩（占全项目 {b(f1(P2/TT*100 if TT else 0))}%）。</div>")
     S += H2('4.1', '各关键生育期每块地的弱长势面积')
     S += ('<p>判断方法：拔节初叶片没有封垄，用 NDVI；之后用 NDRE。'
           f"每期每块地内，像素比本地块中位数低 {b('25%')}（NDVI）或 {b('15%')}（NDRE）以上的算“弱长势”。"
@@ -400,16 +417,27 @@ def build_one(P):
     for bad in ('待核实', '产量', '收益', '盐碱地', '亏损'):
         if bad in d.body and bad not in ('盐碱',):
             pass  # don't auto-delete mid-sentence aggressively; verify later
-    common.CSS += ('h1.tocT{page-break-before:auto!important}.fig p{font-weight:600;color:#0d3b66}'
-                   'ol li{margin:2px 0}a.ev{color:#1565c0;text-decoration:underline;font-size:8.3pt;'
-                   'font-weight:400;white-space:nowrap}a.evn{color:#1565c0;text-decoration:underline}'
-                   'a.back{color:#1565c0;text-decoration:underline;font-size:7.3pt;font-weight:400}.g2 img{width:86%}')
-    cover = (f'<div style="text-align:center;margin:30px 0 20px">'
-             f'<div style="font-size:24pt;font-weight:700;color:#0d3b66">{NAME}项目分析报告</div>'
-             f'<div style="font-size:12pt;color:#555;margin-top:6px">{SEA} · {MU} 亩 · {NP} 个地块</div>'
-             f'<div style="font-size:10pt;color:#777;margin-top:4px">报告日期 <span class="b">2026-10-28</span>'
-             f'　颜色：<span class="g">绿＝正面</span>　<span class="r">红＝风险</span>　'
-             f'<span class="b">蓝＝日期与数字</span></div></div>')
+    if '.rs-cover{' not in common.CSS:
+        common.CSS += (
+            'h1.tocT{page-break-before:auto!important}.fig p{font-weight:600;color:#0d3b66}'
+            'ol li{margin:2px 0}a.ev{color:#1565c0;text-decoration:underline;font-size:8.3pt;'
+            'font-weight:400;white-space:nowrap}a.evn{color:#1565c0;text-decoration:underline}'
+            'a.back{color:#1565c0;text-decoration:underline;font-size:7.3pt;font-weight:400}.g2 img{width:86%}'
+            + COVER_CSS
+        )
+    # 封面用一位小数亩数，与定稿预览一致
+    try:
+        _mu_cover = f"{float(MU):.1f}"
+    except Exception:
+        _mu_cover = MU
+    cover = make_cover_html(dict(
+        name=NAME,
+        province=province_of(P),
+        season=SEA,
+        mu=_mu_cover,
+        n_parcels=NP,
+        report_date='2026年10月28日',
+    ))
     pages = d.build(cover, K, BD)
     return pages
 

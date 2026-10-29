@@ -5,7 +5,7 @@ from catalog import DATA
 
 os.makedirs(DATA, exist_ok=True)
 
-def crop_to_lab(z, LAB, pad=30):
+def crop_to_lab(z, LAB, pad=30, res=10):
     ys,xs=np.where(LAB>0)
     if len(ys)==0:
         return z, LAB, 0, 0
@@ -20,18 +20,51 @@ def crop_to_lab(z, LAB, pad=30):
         @property
         def files(self):
             return list(zc)
-    return Z(), LAB[sl], float(z['x0'])+c0*10, float(z['y1'])-r0*10
+    res = float(res)
+    return Z(), LAB[sl], float(z['x0'])+c0*res, float(z['y1'])-r0*res
 
 def load_cube(P):
-    """Return dates(mm-dd), LAB (1..n parcels), bands dict, x0, y1, PL, mu."""
+    """Return dates(mm-dd), LAB (1..n parcels), bands dict, x0, y1, PL, mu.
+
+    When P['dedup'] and P['lands_json'] are set: clip overlapping parcels by
+    status/land_id priority, rebuild LAB from clipped geoms (ignore npz LAB /
+    labmap), and persist parcels_dedup + dedup_summary JSON.
+    """
     PL = json.load(open(P['parcels']))
     z = np.load(f"{P['npz_dir']}/{P['npz_cl']}_2026.npz")
     dates = [str(x)[5:] if len(str(x)) > 5 else str(x) for x in z['dates']]
-    LAB = z['LAB'].astype(np.int32)
-    if P.get('labmap'):
-        lm = json.load(open(P['labmap']))
-        LAB = np.array(lm['map'], dtype=np.int32)[LAB]
-    return dates, LAB, z, float(z['x0']), float(z['y1']), PL, np.array([p['mu'] for p in PL], float)
+    x0 = float(z['x0']); y1 = float(z['y1'])
+    res = float(P.get('pixel_m', 10))
+    if P.get('dedup') and P.get('lands_json'):
+        from parcel_dedup import status_map_from_lands, dedup_parcels, rasterize_lab
+        sm = status_map_from_lands(P['lands_json'])
+        keep, merged, summary = dedup_parcels(PL, sm, P['epsg'])
+        # persist next to original parcels + pipeline data
+        parcels_path = P['parcels']
+        dedup_parcels_path = parcels_path.replace('_parcels.json', '_parcels_dedup.json')
+        if dedup_parcels_path == parcels_path:
+            dedup_parcels_path = parcels_path + '.dedup.json'
+        json.dump(keep, open(dedup_parcels_path, 'w'), ensure_ascii=False)
+        merged_path = dedup_parcels_path.replace('_parcels_dedup.json', '_parcels_merged.json')
+        if merged_path == dedup_parcels_path:
+            merged_path = parcels_path + '.merged.json'
+        json.dump(merged, open(merged_path, 'w'), ensure_ascii=False)
+        summary['parcels_dedup'] = dedup_parcels_path
+        summary['parcels_merged'] = merged_path
+        summary['key'] = P.get('key')
+        sum_path = f"{DATA}/{P['key']}_dedup_summary.json"
+        json.dump(summary, open(sum_path, 'w'), ensure_ascii=False, indent=2)
+        print(P.get('key'), 'dedup', summary['before_n'], '→', summary['kept_n'],
+              'mu', summary['before_mu'], '→', summary['kept_mu'],
+              'merged', summary['merged_n'], flush=True)
+        PL = keep
+        LAB = rasterize_lab(PL, x0, y1, z['LAB'].shape, P['epsg'], res)
+    else:
+        LAB = z['LAB'].astype(np.int32)
+        if P.get('labmap'):
+            lm = json.load(open(P['labmap']))
+            LAB = np.array(lm['map'], dtype=np.int32)[LAB]
+    return dates, LAB, z, x0, y1, PL, np.array([p['mu'] for p in PL], float)
 
 def clear_mask(z, j, strict=False):
     b02_th = 0.12 if strict else 0.2
@@ -77,8 +110,14 @@ def vi(z, j, kind):
     v[(v > 1) | (v < -1)] = np.nan
     return v
 
-def classify_season(dates, z, LAB, PL, spring_hint=False):
-    """Return list of 'spring'|'summer' per parcel from mid-June NDVI."""
+def classify_season(dates, z, LAB, PL, spring_hint=False, force_season=None):
+    """Return list of 'spring'|'summer' per parcel from mid-June NDVI.
+
+    force_season='summer'|'spring' overrides mid-June greenness (e.g. Banquan
+    mid-June green is leftover potatoes / other residue, not spring corn).
+    """
+    if force_season in ('spring', 'summer'):
+        return [force_season] * len(PL)
     # find date near 06-15
     try:
         j, d, cov = idx_at(dates, z, LAB, '06-15', 0.25)
@@ -100,7 +139,13 @@ def classify_season(dates, z, LAB, PL, spring_hint=False):
         if not np.isfinite(med):
             out.append('spring' if spring_hint else 'summer'); continue
         # spring if already green mid-June; summer if still bare
+        # optional harden: mid-June green but still rising into Aug, and not
+        # spring_hint → treat as summer (previous crop / residue, not spring corn)
         if med >= 0.35:
+            if (not spring_hint) and V2 is not None:
+                med2 = float(np.nanmedian(V2[m]))
+                if np.isfinite(med2) and med2 > med + 0.12:
+                    out.append('summer'); continue
             out.append('spring')
         elif med <= 0.22:
             out.append('summer')
@@ -132,9 +177,10 @@ ST_SUMMER = [
 
 def run_weak(P):
     dates, LAB0, z0, x0, y1, PL, mu = load_cube(P)
-    z, LAB, x0, y1 = crop_to_lab(z0, LAB0)
+    z, LAB, x0, y1 = crop_to_lab(z0, LAB0, res=P.get('pixel_m', 10))
     covers = date_covers(dates, z, LAB)
-    seasons = classify_season(dates, z, LAB, PL, P.get('spring', False))
+    force = P.get('force_season') or P.get('season_override')
+    seasons = classify_season(dates, z, LAB, PL, P.get('spring', False), force_season=force)
     # if almost all one season, force single group to avoid tiny mixed groups
     n_sp = sum(1 for s in seasons if s == 'spring')
     n_su = len(seasons) - n_sp
@@ -305,6 +351,8 @@ def run_weak(P):
         peak_window=(pa, pb), low_rows=low_rows,
         dates=dates, n_parcels=len(PL), total_mu=float(mu.sum()),
         x0=x0, y1=y1, epsg=P['epsg'],
+        pixel_m=float(P.get('pixel_m', 10)),
+        dedup=bool(P.get('dedup') and P.get('lands_json')),
     )
     # JSON-safe (drop huge)
     js = {k: v for k, v in out.items() if k != 'groups'}

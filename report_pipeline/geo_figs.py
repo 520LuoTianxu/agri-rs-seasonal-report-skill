@@ -18,19 +18,20 @@ os.makedirs(FIG, exist_ok=True)
 def _inv(epsg, x0, y1):
     return Transformer.from_crs(epsg, 4326, always_xy=True).transform
 
-def mesh(inv, x0, y1, s):
+def mesh(inv, x0, y1, s, res=10):
     r = np.arange(s[0].start, s[0].stop + 1)
     c = np.arange(s[1].start, s[1].stop + 1)
-    X, Y = np.meshgrid(x0 + c * 10, y1 - r * 10)
+    res = float(res)
+    X, Y = np.meshgrid(x0 + c * res, y1 - r * res)
     return inv(X, Y)
 
-def show(a, inv, x0, y1, s, v, **kw):
-    LO, LA = mesh(inv, x0, y1, s)
+def show(a, inv, x0, y1, s, v, res=10, **kw):
+    LO, LA = mesh(inv, x0, y1, s, res=res)
     return a.pcolormesh(LO, LA, np.ma.masked_invalid(v), shading='flat',
                         edgecolors='none', antialiased=False, **kw)
 
-def show_rgb(a, inv, x0, y1, s, im):
-    LO, LA = mesh(inv, x0, y1, s)
+def show_rgb(a, inv, x0, y1, s, im, res=10):
+    LO, LA = mesh(inv, x0, y1, s, res=res)
     q = a.pcolormesh(LO, LA, np.zeros(im.shape[:2]), shading='flat', antialiased=False)
     q.set_array(None); q.set_facecolor(im.reshape(-1, 3)); q.set_edgecolor('face'); q.set_linewidth(0)
 
@@ -61,12 +62,13 @@ def sl_pad(LAB, pad=20):
 
 def make_figs(P, weak=None):
     dates, LAB0, z0, x0, y1, PL, mu = load_cube(P)
-    z, LAB, x0, y1 = crop_to_lab(z0, LAB0)
+    res = float(P.get('pixel_m', 10))
+    z, LAB, x0, y1 = crop_to_lab(z0, LAB0, res=res)
     inv = _inv(P['epsg'], x0, y1)
     # centroid lat
     ys, xs = np.where(LAB > 0)
     if len(ys):
-        lo, la = inv(x0 + xs.mean() * 10, y1 - ys.mean() * 10)
+        lo, la = inv(x0 + xs.mean() * res, y1 - ys.mean() * res)
     else:
         la = 35.0
     sl = sl_pad(LAB)
@@ -101,7 +103,7 @@ def make_figs(P, weak=None):
     ax = np.atleast_1d(ax).ravel()
     for a, (d, nm) in zip(ax, st_dates):
         j = dates.index(d)
-        show_rgb(a, inv, x0, y1, sl, rgbz(z, j, sl))
+        show_rgb(a, inv, x0, y1, sl, rgbz(z, j, sl), res=res)
         outl(a, PL, '#ffe600', .55)
         a.set_title(f'{nm}　2026-{d}', fontsize=10.5, color='#0d3b66')
         geo(a, la)
@@ -144,18 +146,18 @@ def make_figs(P, weak=None):
         jb, db, _ = idx_at(dates, z, LAB, '08-01' if 'summer' in weak['groups'] else '07-20', 0.2)
     except Exception:
         jb = ix[len(ix)//2] if ix else 0
-    show_rgb(a, inv, x0, y1, sl, rgbz(z, jb, sl) * 0.45 + 0.2)
+    show_rgb(a, inv, x0, y1, sl, rgbz(z, jb, sl) * 0.45 + 0.2, res=res)
     m = show(a, inv, x0, y1, sl, np.where(LAB[sl] > 0, pk[sl], np.nan),
-             cmap='RdYlGn', vmin=0.35, vmax=0.75)
+             res=res, cmap='RdYlGn', vmin=0.35, vmax=0.75)
     outl(a, PL, '#222', .4); plt.colorbar(m, ax=a, fraction=.035, label='峰值 NDRE')
-    a.set_title(f'拔节后峰值 NDRE（{pa}～{pb}，10 米原始像素）', fontsize=10, color='#0d3b66')
+    a.set_title(f'拔节后峰值 NDRE（{pa}～{pb}，{int(res)} 米原始像素）', fontsize=10, color='#0d3b66')
     geo(a, la)
 
     a = axs[1]
     show_rgb(a, inv, x0, y1, sl, rgbz(z, jb, sl) * 0.45 + 0.2)
     norm = TwoSlopeNorm(vmin=-30, vcenter=0, vmax=30)
     m = show(a, inv, x0, y1, sl, np.where(LAB[sl] > 0, rel[sl], np.nan),
-             cmap='RdYlGn', norm=norm)
+             res=res, cmap='RdYlGn', norm=norm)
     outl(a, PL, '#222', .4); plt.colorbar(m, ax=a, fraction=.035, label='相对同组中位数（%）')
     a.set_title('比同组地块中位数高或低（%）', fontsize=10, color='#0d3b66')
     geo(a, la)
@@ -183,15 +185,18 @@ def make_figs(P, weak=None):
     fig, ax = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.8 * nrows))
     ax = np.atleast_1d(ax).ravel()
     for a, (g, s, d, nm, ixn, arr, kind) in zip(ax, panels):
-        show_rgb(a, inv, x0, y1, sl, rgbz(z, jb, sl) * 0.4 + 0.25)
+        show_rgb(a, inv, x0, y1, sl, rgbz(z, jb, sl) * 0.4 + 0.25, res=res)
         if kind == 'rel':
             norm = TwoSlopeNorm(vmin=-30, vcenter=0, vmax=30)
             m = show(a, inv, x0, y1, sl, np.where(LAB[sl] > 0, arr[sl], np.nan),
-                     cmap='RdYlGn', norm=norm)
+                     res=res, cmap='RdYlGn', norm=norm)
             a.set_title(f'{("春" if g=="spring" else "夏")}·{nm} {d}（{ixn}）', fontsize=9, color='#0d3b66')
         else:
-            m = show(a, inv, x0, y1, sl, np.where(LAB[sl] > 0, arr[sl], np.nan),
-                     cmap='YlOrRd', vmin=0, vmax=max(3, np.nanmax(arr[LAB>0]) if (LAB>0).any() else 3))
+            _m = LAB[sl] > 0
+            _vals = arr[sl][_m] if _m.any() else np.array([])
+            _vmax = max(3, float(np.nanmax(_vals)) if _vals.size and np.isfinite(_vals).any() else 3)
+            m = show(a, inv, x0, y1, sl, np.where(_m, arr[sl], np.nan),
+                     res=res, cmap='YlOrRd', vmin=0, vmax=_vmax)
             a.set_title(f'{("春" if g=="spring" else "夏")}·偏弱期数', fontsize=9, color='#0d3b66')
         outl(a, PL, '#222', .35); geo(a, la, 6)
         plt.colorbar(m, ax=a, fraction=.04)
