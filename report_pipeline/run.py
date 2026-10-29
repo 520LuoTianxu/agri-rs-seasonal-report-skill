@@ -27,6 +27,18 @@ def run_one(P, skip_ana=False, force_ana=False):
     weak_path=f"{DATA}/{P['key']}_weak.json"
     if force_ana or not os.path.exists(weak_path):
         run_weak(P)
+    # optional drought/flood on weak parcels (side JSON; report gate inside module)
+    try:
+        from hazard_analyze import analyze_project as _hazard
+        if P.get('hazard', True):
+            flood_csv = P.get('flood_csv')
+            rain_glob = P.get('rain_glob')
+            kw = {}
+            if flood_csv: kw['flood_csv'] = flood_csv
+            if rain_glob: kw['rain_glob'] = rain_glob
+            _hazard(P['key'], **kw)
+    except Exception as e:
+        print('hazard skip', P.get('key'), e, flush=True)
     make_figs(P)
     pages = build_one(P)
     return dict(key=P['key'], pages=pages, pdf=P['out_pdf'],
